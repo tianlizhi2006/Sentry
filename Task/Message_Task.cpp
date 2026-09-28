@@ -101,15 +101,18 @@ void DR16_Rx_Task(void *pvParameters)
                     && (payload[5] | (payload[6] << 8)) == 0x0311)
                 {
                     custom_keymouse_to_rc(&payload[7], Message.RC_Ptr);
+                    RC_mark_frame_received();
                 }
             }
             else if (length == 21 && payload[0] == 0xA9 && payload[1] == 0x53)
             {
                 serial_to_rc(payload, Message.RC_Ptr);
+                RC_mark_frame_received();
             }
             else if (length == 18)
             {
                 sbus_to_rc(payload, Message.RC_Ptr);
+                RC_mark_frame_received();
                 if (RC_data_is_error(Message.RC_Ptr))
                 {
                     slove_data_error();

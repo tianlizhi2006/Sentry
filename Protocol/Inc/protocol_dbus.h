@@ -213,6 +213,8 @@ typedef __packed struct   // 图传链路数据结构体 （现在以校验作�
 extern RC_ctrl_t RC_ctrl;
 static int16_t RC_abs(int16_t value);
 extern void RC_restart(uint16_t dma_buf_num);
+// 每收到一帧遥控数据时更新时间戳，供失联超时保护使用。
+extern void RC_mark_frame_received(void);
 extern uint8_t RC_data_is_error(RC_ctrl_t *rc_ctrl);
 extern void slove_RC_lost(void);
 extern void slove_data_error(void);

@@ -7,6 +7,17 @@ remote_data_t remote;
 
 //遥控器出错数据上限
 #define RC_CHANNAL_ERROR_VALUE 700
+// DR16正常约每7 ms发送一帧；连续100 ms没有收到数据即判定失联。
+#define RC_LOST_TIMEOUT_MS 100u
+
+static volatile uint32_t rc_last_frame_tick = 0u;
+static volatile bool rc_frame_received = false;
+
+void RC_mark_frame_received(void)
+{
+    rc_last_frame_tick = HAL_GetTick();
+    rc_frame_received = true;
+}
 /**
   * @brief          remote control protocol resolution
   * @param[in]      sbus_buf: raw data point
@@ -115,11 +126,6 @@ void sbus_to_rc(volatile const uint8_t *sbus_buf, RC_ctrl_t *rc_ctrl)
 
 	rc_ctrl->rc.s[0] = ((sbus_buf[5] >> 4) & 0x0003);                  //!< Switch left
     rc_ctrl->rc.s[1] = ((sbus_buf[5] >> 4) & 0x000C) >> 2;                       //!< Switch right
-
-	if( rc_ctrl->rc.s[0] == 1 && rc_ctrl->rc.s[1] == 1 ){
-	
-	
-	} else{
 	
     rc_ctrl->rc.ch[0] = (sbus_buf[0] | (sbus_buf[1] << 8)) & 0x07ff;        //!< Channel 0
     rc_ctrl->rc.ch[1] = ((sbus_buf[1] >> 3) | (sbus_buf[2] << 5)) & 0x07ff; //!< Channel 1
@@ -139,7 +145,6 @@ void sbus_to_rc(volatile const uint8_t *sbus_buf, RC_ctrl_t *rc_ctrl)
     rc_ctrl->rc.ch[2] -= RC_CH_VALUE_OFFSET;
     rc_ctrl->rc.ch[3] -= RC_CH_VALUE_OFFSET;
     rc_ctrl->rc.ch[4] -= RC_CH_VALUE_OFFSET;
-	}
 		
 }
 
@@ -278,6 +283,11 @@ void serial_to_rc(volatile const uint8_t *buf, RC_ctrl_t *rc_ctrl)
 //判断遥控器数据是否出错，
 uint8_t RC_data_is_error(RC_ctrl_t *rc_ctrl)
 {
+    // 数值仍可能保持在最后一次合法状态，因此必须独立检查接收时间。
+    if (!rc_frame_received || (uint32_t)(HAL_GetTick() - rc_last_frame_tick) > RC_LOST_TIMEOUT_MS)
+    {
+        goto error;
+    }
     //使用了go to语句 方便出错统一处理遥控器变量数据归零
     if (RC_abs(rc_ctrl->rc.ch[0]) > RC_CHANNAL_ERROR_VALUE)
     {
@@ -311,6 +321,8 @@ error:
     rc_ctrl->rc.ch[2] = 0;
     rc_ctrl->rc.ch[3] = 0;
     rc_ctrl->rc.ch[4] = 0;
+    rc_ctrl->rc.s[0] = 0;
+    rc_ctrl->rc.s[1] = 0;
     rc_ctrl->mouse.x = 0;
     rc_ctrl->mouse.y = 0;
     rc_ctrl->mouse.z = 0;

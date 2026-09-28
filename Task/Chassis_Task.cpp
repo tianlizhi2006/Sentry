@@ -42,16 +42,19 @@ void Chassis_Task(void *argument)
 	/* Infinite loop */
 	for (;;)
 	{
-		
+		//状态机切换
 		Chassis.Behaviour_Mode();
+		//外设数据反馈更新
 		Chassis.Feedback_Update();
+		//速度矢量参考系转换，获得底盘中心目标速度
 		Chassis.Control();
+		//逆解算与PID计算
 		Chassis.Control_loop();
 		
+
+
 		Send_SuperCap_Command();
 
-
-		
 		if(Chassis.Mode == CHASSIS_NO_MOVE)
 		{
 			CAN_Cmd.SendData(&CAN_Cmd.Chassis, 0, 0, 0, 0);
@@ -157,12 +160,13 @@ void Chassis_Ctrl::Feedback_Update(void)
 // 底盘行为状态设置
 void Chassis_Ctrl::Behaviour_Mode(void)
 {
-	// 只使用 DR16：右拨杆下=无力，中=正常，上=小陀螺。
+	// DR16：右拨杆下=无力，中=正常，上=小陀螺；双拨杆同时向上=键盘普通模式。
 	if (RC_data_is_error(RC_Ptr) || switch_is_down(RC_Ptr->rc.s[CHANNEL_RIGHT]))
 	{
 		Mode = CHASSIS_NO_MOVE;
 	}
-	else if (switch_is_up(RC_Ptr->rc.s[CHANNEL_RIGHT]))
+	else if (switch_is_up(RC_Ptr->rc.s[CHANNEL_RIGHT])
+		&& !switch_is_up(RC_Ptr->rc.s[CHANNEL_LEFT]))
 	{
 		Mode = CHASSIS_LITTLE_TOP;
 	}
@@ -191,6 +195,35 @@ float Power_Set_KP_Y = 0.12;
 // 遥控器的数据处理成底盘的前进vx速度，vy速度
 void Chassis_Ctrl::RC_to_Control(fp32 *vx_set, fp32 *vy_set)
 {
+
+	//当两边拨杆同时在最上方的话，进入由键盘控制的普通模式
+
+	if (switch_is_up(RC_Ptr->rc.s[CHANNEL_LEFT]) && switch_is_up(RC_Ptr->rc.s[CHANNEL_RIGHT]))
+	{
+		const fp32 keyboard_speed_scale = sqrt(Power_Ctrl.Power_limit.Chassis_Max_power);
+		*vx_set = 0.0f;
+		*vy_set = 0.0f;
+
+		if ((RC_Ptr->key.v & KEY_PRESSED_OFFSET_W) && !(RC_Ptr->key.v & KEY_PRESSED_OFFSET_S))
+		{
+			*vx_set = Power_Set_KP_X * keyboard_speed_scale;
+		}
+		else if ((RC_Ptr->key.v & KEY_PRESSED_OFFSET_S) && !(RC_Ptr->key.v & KEY_PRESSED_OFFSET_W))
+		{
+			*vx_set = -Power_Set_KP_X * keyboard_speed_scale;
+		}
+
+		if ((RC_Ptr->key.v & KEY_PRESSED_OFFSET_A) && !(RC_Ptr->key.v & KEY_PRESSED_OFFSET_D))
+		{
+			*vy_set = Power_Set_KP_Y * keyboard_speed_scale;
+		}
+		else if ((RC_Ptr->key.v & KEY_PRESSED_OFFSET_D) && !(RC_Ptr->key.v & KEY_PRESSED_OFFSET_A))
+		{
+			*vy_set = -Power_Set_KP_Y * keyboard_speed_scale;
+		}
+		return;
+	}
+
 	int16_t vx_channel;
 	int16_t vy_channel;
 	rc_deadline_limit(RC_Ptr->rc.ch[CHASSIS_X_CHANNEL], vx_channel, CHASSIS_RC_DEADLINE);
@@ -201,7 +234,7 @@ void Chassis_Ctrl::RC_to_Control(fp32 *vx_set, fp32 *vy_set)
 	const fp32 vy_set_channel = vy_channel * Power_Set_KP_Y * power_speed_scale;
 
 	// DR16 左摇杆：ch3 向前推时的原始符号与底盘 +X 相反，因此前后输入在这里取反。
-	// ch2 直接作为云台坐标系的左右平移量，不参与车体旋转。
+	// ch2 直接作为云台坐标系的左右平移量
 	*vx_set = -vx_set_channel;
 	*vy_set = vy_set_channel;
 }
@@ -221,7 +254,6 @@ void Chassis_Ctrl::Behaviour_Control(fp32 *vx_set, fp32 *vy_set, fp32 *angle_set
 		Power_Set_KP_X = 0.15;
 		Power_Set_KP_Y = 0.12;
 		RC_to_Control(vx_set, vy_set);
-		// 正常模式下左摇杆 ch2 只负责左右平移，不再控制底盘旋转。
 		*angle_set = 0.0f;
 	}
 	else if (Mode == CHASSIS_LITTLE_TOP)
